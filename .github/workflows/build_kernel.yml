@@ -1,0 +1,161 @@
+name: Build & Package Azeo Kernel
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      ksu_branch:
+        description: "KernelSU Next Branch / Tag"
+        required: true
+        default: "next"
+        type: string
+      release_build:
+        description: "Create a GitHub Release after successful build"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-kernel:
+    name: Compile Kernel (AOSP Clang)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout Kernel Config Repository
+        uses: actions/checkout@v6
+
+      - name: Set Environment Variables & Build Date
+        run: |
+          BUILD_DATE=$(date +'%Y.%m.%d')
+          BUILD_TIME=$(date +'%H%M')
+          KERNEL_VERSION="v1.0.0-${BUILD_DATE}"
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
+          echo "ZIP_NAME=AzeoKernel-sweet-${KERNEL_VERSION}.zip" >> $GITHUB_ENV
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison ca-certificates curl flex gcc git libc6-dev libssl-dev make \
+            openssl python3 python3-pip python-is-python3 libelf-dev xz-utils \
+            zlib1g-dev cpio kmod
+
+      - name: Download AOSP Clang Toolchain
+        run: |
+          mkdir -p clang-aosp
+          cd clang-aosp
+          echo "Fetching AOSP Clang 18..."
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
+          tar -xzf clang-r522817.tar.gz
+          rm -f clang-r522817.tar.gz
+          echo "CLANG_PATH=$(pwd)/bin" >> $GITHUB_ENV
+
+      - name: Clone LineageOS SM6150 Kernel Source
+        run: |
+          git clone --depth=1 https://github.com/LineageOS/android_kernel_xiaomi_sm6150.git -b lineage-22.1 kernel_src
+
+      - name: Integrate KernelSU Next
+        run: |
+          cd kernel_src
+          echo "Integrating KernelSU-Next..."
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s ${{ inputs.ksu_branch || 'next' }}
+
+      - name: Compile Kernel Image (sweet_defconfig)
+        run: |
+          cd kernel_src
+          export PATH="${{ env.CLANG_PATH }}:${PATH}"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
+
+          make O=out sweet_user_defconfig CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+          # Apply config tweaks for daily driver & KernelSU
+          scripts/config --file out/.config \
+            -e KSU \
+            -e KSU_DEBUG \
+            -e TCP_CONG_BBR \
+            -d LOCALVERSION_AUTO
+
+          echo "Starting compilation with $(nproc) cores..."
+          make -j$(nproc) O=out \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image.gz-dtb dtbo.img
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
+          cd anykernel
+          
+          # Customise AnyKernel3 banner for Azeo Kernel
+          sed -i 's/kernel.string=.*/kernel.string=Azeo Kernel for Redmi Note 10 Pro (sweet)/g' anykernel.sh
+          sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel.sh
+          sed -i 's/device.name2=.*/device.name2=sweetin/g' anykernel.sh
+
+          cp ../kernel_src/out/arch/arm64/boot/Image.gz-dtb .
+          cp ../kernel_src/out/arch/arm64/boot/dtbo.img . 2>/dev/null || true
+
+          zip -r9 "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
+
+      - name: Generate Checksums
+        run: |
+          sha256sum "${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
+          echo "Generated SHA256:"
+          cat "${{ env.ZIP_NAME }}.sha256"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ZIP_NAME }}
+          path: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
+
+      - name: Create GitHub Release
+        if: ${{ inputs.release_build || github.event_name == 'push' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.KERNEL_VERSION }}
+          name: "Azeo Kernel — ${{ env.KERNEL_VERSION }}"
+          body: |
+            ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (`sweet` / `sweetin`)
+            
+            - **Kernel Version:** `${{ env.KERNEL_VERSION }}`
+            - **Built Date:** `${{ env.BUILD_DATE }}`
+            - **Toolchain:** `AOSP Clang 18 (r522817)`
+            - **KernelSU Next:** Integrated (`${{ inputs.ksu_branch || 'next' }}`)
+            - **Flashing Method:** AnyKernel3 Flashable ZIP (via TWRP/OrangeFox)
+            
+            #### Checksum:
+            ```text
+            $(cat ${{ env.ZIP_NAME }}.sha256)
+            ```
+          files: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
