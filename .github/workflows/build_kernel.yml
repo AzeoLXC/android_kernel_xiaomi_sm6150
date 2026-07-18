@@ -37,14 +37,12 @@ jobs:
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
 
-          # 1. Fetch latest commit SHA from upstream repo (branch 23.2)
           UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
           if [ -z "$UPSTREAM_SHA" ]; then
             UPSTREAM_SHA="unknown"
           fi
           SHORT_SHA=$(echo "$UPSTREAM_SHA" | cut -c1-7)
 
-          # 2. Dynamic SemVer Calculation
           LATEST_TAG=$(git tag -l "v*.*.*" | sort -V | tail -n 1)
           if [ -z "$LATEST_TAG" ]; then
             BASE_MAJOR=1
@@ -159,11 +157,19 @@ jobs:
             CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
             CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
 
-      - name: Package Flashable Zip with AnyKernel3
+      - name: Package Flashable Zip with AnyKernel3 (Full Custom Branding)
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/Anykernel3.git -b reforge AnyKernel3
           
+          # 1. Customise AnyKernel3 Banner Text
+          cat << 'EOF' > AnyKernel3/banner
+          Azeo Kernel: boot sequence start...
+          Redmi Note 10 Pro / Pro Max (sweet)
+          Built by Azeo
+          EOF
+
+          # 2. Customise AnyKernel3 Configuration
           sed -i 's/kernel.string=.*/kernel.string=Azeo Kernel for Redmi Note 10 Pro (sweet)/g' AnyKernel3/anykernel.sh
           sed -i 's/device.name1=.*/device.name1=sweet/g' AnyKernel3/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=sweetin/g' AnyKernel3/anykernel.sh
