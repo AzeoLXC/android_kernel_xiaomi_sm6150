@@ -124,7 +124,7 @@ jobs:
           echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
-      - name: Fetch SM6150 Kernel Source & Apply Custom Branding
+      - name: Fetch SM6150 Kernel Source & Rebrand Defconfig
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 23.2 kernel_src
@@ -134,9 +134,10 @@ jobs:
           echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
           echo "FULL_SHA=${FULL_SHA}" >> $GITHUB_ENV
 
-          # Inject Full Custom Kernel Naming into Kernel Makefile / localversion
-          sed -i 's/-reforge/-AzeoKernel/g' localversion* 2>/dev/null || true
-          sed -i 's/EXTRAVERSION =.*/EXTRAVERSION = -AzeoKernel/g' Makefile 2>/dev/null || true
+          # 1. Disable CONFIG_LOCALVERSION_AUTO to remove '-dirty' and git hash suffix
+          # 2. Set CONFIG_LOCALVERSION to '-AzeoKernel' directly in defconfig
+          sed -i 's/CONFIG_LOCALVERSION="-reforge"/CONFIG_LOCALVERSION="-AzeoKernel"/g' arch/arm64/configs/vendor/sweet_defconfig
+          sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/g' arch/arm64/configs/vendor/sweet_defconfig
 
       - name: Build Kernel
         if: steps.check_state.outputs.skip_build != 'true'
@@ -149,6 +150,12 @@ jobs:
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
+
+          # Ensure CONFIG_LOCALVERSION overrides are locked in .config
+          scripts/config --file out/.config \
+            --set-str CONFIG_LOCALVERSION "-AzeoKernel" \
+            -d CONFIG_LOCALVERSION_AUTO
+
           make -j$(nproc --all) O=out ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
@@ -162,14 +169,14 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/manipvlator/Anykernel3.git -b reforge AnyKernel3
           
-          # 1. Customise AnyKernel3 Banner Text
+          # Customise AnyKernel3 Banner Text
           cat << 'EOF' > AnyKernel3/banner
           Azeo Kernel: boot sequence start...
           Redmi Note 10 Pro / Pro Max (sweet)
           Built by Azeo
           EOF
 
-          # 2. Customise AnyKernel3 Configuration
+          # Customise AnyKernel3 Configuration
           sed -i 's/kernel.string=.*/kernel.string=Azeo Kernel for Redmi Note 10 Pro (sweet)/g' AnyKernel3/anykernel.sh
           sed -i 's/device.name1=.*/device.name1=sweet/g' AnyKernel3/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=sweetin/g' AnyKernel3/anykernel.sh
