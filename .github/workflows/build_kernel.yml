@@ -24,8 +24,10 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
-      - name: Check Upstream Commit & Local Release State
+      - name: Resolve Dynamic Version & Check Upstream State
         id: check_state
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,32 +36,55 @@ jobs:
           sudo ln -s /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
-          KERNEL_VERSION="v1.0.0-${BUILD_DATE}"
+          CALVER="v2026.07.18" # Baseline
+          CALVER_DATE="v${BUILD_DATE}"
+
+          # 1. Fetch latest commit SHA from upstream repo (branch 23.2)
+          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
+          if [ -z "$UPSTREAM_SHA" ]; then
+            UPSTREAM_SHA="unknown"
+          fi
+          SHORT_SHA=$(echo "$UPSTREAM_SHA" | cut -c1-7)
+
+          # 2. Dynamic SemVer Calculation from Git Releases / Tags
+          # Find highest semantic version released so far (e.g. v1.0.0)
+          LATEST_TAG=$(git tag -l "v*.*.*" | sort -V | tail -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_MAJOR=1
+            BASE_MINOR=0
+            BASE_PATCH=0
+          else
+            CLEAN_TAG=$(echo "$LATEST_TAG" | sed 's/^v//' | cut -d'-' -f1)
+            BASE_MAJOR=$(echo "$CLEAN_TAG" | cut -d'.' -f1)
+            BASE_MINOR=$(echo "$CLEAN_TAG" | cut -d'.' -f2)
+            BASE_PATCH=$(echo "$CLEAN_TAG" | cut -d'.' -f3)
+          fi
+
+          # 3. Read local state
+          LAST_SHA=""
+          if [ -f ".last_upstream_sha" ]; then
+            LAST_SHA=$(cat .last_upstream_sha)
+          fi
+
+          # Increment MINOR if upstream SHA changed, otherwise use current
+          if [ -n "$LAST_SHA" ] && [ "$LAST_SHA" != "$UPSTREAM_SHA" ] && [ "$UPSTREAM_SHA" != "unknown" ]; then
+            NEW_MINOR=$((BASE_MINOR + 1))
+            NEW_PATCH=0
+          else
+            NEW_MINOR=$BASE_MINOR
+            NEW_PATCH=$BASE_PATCH
+          fi
+
+          KERNEL_VERSION="v${BASE_MAJOR}.${NEW_MINOR}.${NEW_PATCH}-${BUILD_DATE}"
           ZIP_NAME="AzeoKernel-sweet-${KERNEL_VERSION}.zip"
 
           echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-
-          # 1. Fetch latest commit SHA from upstream repo (branch 23.2)
-          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
-          
-          if [ -z "$UPSTREAM_SHA" ]; then
-            echo "Warning: Failed to fetch upstream SHA via API. Falling back to default clone check."
-            UPSTREAM_SHA="unknown"
-          fi
-
-          echo "Latest Upstream SHA: ${UPSTREAM_SHA}"
           echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
 
-          # 2. Check last processed SHA recorded in repo
-          LAST_SHA=""
-          if [ -f ".last_upstream_sha" ]; then
-            LAST_SHA=$(cat .last_upstream_sha)
-          fi
-
-          # 3. Check if release tag for today already exists
+          # 4. Check if exact release tag exists on GitHub
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
@@ -67,20 +92,19 @@ jobs:
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
           EVENT_NAME="${{ github.event_name }}"
 
-          echo "Event: ${EVENT_NAME} | Tag HTTP: ${HTTP_STATUS} | Last SHA: ${LAST_SHA} | Upstream SHA: ${UPSTREAM_SHA}"
+          echo "Resolved Version: ${KERNEL_VERSION} | Tag HTTP: ${HTTP_STATUS} | Last SHA: ${LAST_SHA} | Upstream SHA: ${UPSTREAM_SHA}"
 
-          # Decision Matrix
           if [ "$FORCE_BUILD" = "true" ]; then
-            echo "Force build enabled. Proceeding with compilation."
+            echo "Force build enabled. Proceeding."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           elif [ "$EVENT_NAME" = "schedule" ] && [ "$LAST_SHA" = "$UPSTREAM_SHA" ] && [ "$UPSTREAM_SHA" != "unknown" ]; then
-            echo "CRON Watcher: No new upstream commits detected (${UPSTREAM_SHA}). Skipping build cleanly."
+            echo "CRON: Upstream unchanged (${SHORT_SHA}). Skipping cleanly."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           elif [ "$HTTP_STATUS" = "200" ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
-            echo "Release ${KERNEL_VERSION} already exists for today. Skipping build cleanly."
+            echo "Release ${KERNEL_VERSION} already published. Skipping cleanly."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "New commit or manual trigger detected. Proceeding with compilation."
+            echo "Proceeding with compilation for ${KERNEL_VERSION}."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
