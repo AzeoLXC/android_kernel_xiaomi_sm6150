@@ -36,8 +36,6 @@ jobs:
           sudo ln -s /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
-          CALVER="v2026.07.18" # Baseline
-          CALVER_DATE="v${BUILD_DATE}"
 
           # 1. Fetch latest commit SHA from upstream repo (branch 23.2)
           UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
@@ -46,8 +44,7 @@ jobs:
           fi
           SHORT_SHA=$(echo "$UPSTREAM_SHA" | cut -c1-7)
 
-          # 2. Dynamic SemVer Calculation from Git Releases / Tags
-          # Find highest semantic version released so far (e.g. v1.0.0)
+          # 2. Dynamic SemVer Calculation
           LATEST_TAG=$(git tag -l "v*.*.*" | sort -V | tail -n 1)
           if [ -z "$LATEST_TAG" ]; then
             BASE_MAJOR=1
@@ -60,13 +57,11 @@ jobs:
             BASE_PATCH=$(echo "$CLEAN_TAG" | cut -d'.' -f3)
           fi
 
-          # 3. Read local state
           LAST_SHA=""
           if [ -f ".last_upstream_sha" ]; then
             LAST_SHA=$(cat .last_upstream_sha)
           fi
 
-          # Increment MINOR if upstream SHA changed, otherwise use current
           if [ -n "$LAST_SHA" ] && [ "$LAST_SHA" != "$UPSTREAM_SHA" ] && [ "$UPSTREAM_SHA" != "unknown" ]; then
             NEW_MINOR=$((BASE_MINOR + 1))
             NEW_PATCH=0
@@ -84,15 +79,12 @@ jobs:
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
 
-          # 4. Check if exact release tag exists on GitHub
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
 
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
           EVENT_NAME="${{ github.event_name }}"
-
-          echo "Resolved Version: ${KERNEL_VERSION} | Tag HTTP: ${HTTP_STATUS} | Last SHA: ${LAST_SHA} | Upstream SHA: ${UPSTREAM_SHA}"
 
           if [ "$FORCE_BUILD" = "true" ]; then
             echo "Force build enabled. Proceeding."
@@ -134,7 +126,7 @@ jobs:
           echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
-      - name: Fetch Patched SM6150 Kernel Source
+      - name: Fetch SM6150 Kernel Source & Apply Custom Branding
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 23.2 kernel_src
@@ -144,6 +136,10 @@ jobs:
           echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
           echo "FULL_SHA=${FULL_SHA}" >> $GITHUB_ENV
 
+          # Inject Full Custom Kernel Naming into Kernel Makefile / localversion
+          sed -i 's/-reforge/-AzeoKernel/g' localversion* 2>/dev/null || true
+          sed -i 's/EXTRAVERSION =.*/EXTRAVERSION = -AzeoKernel/g' Makefile 2>/dev/null || true
+
       - name: Build Kernel
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
@@ -151,7 +147,7 @@ jobs:
           export ARCH=arm64
           export PATH="$CLANG_PATH/bin:$GCC64_PATH/bin:$GCC32_PATH/bin:$PATH"
           export KBUILD_BUILD_USER="Azeo"
-          export KBUILD_BUILD_HOST="Homelab"
+          export KBUILD_BUILD_HOST="AzeoLab"
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
