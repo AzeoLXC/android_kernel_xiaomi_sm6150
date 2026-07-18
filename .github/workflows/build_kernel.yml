@@ -5,10 +5,10 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
-      release_build:
-        description: "Create a GitHub Release after successful build"
+      force_build:
+        description: "Force rebuild even if release tag exists for today"
         required: false
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -23,7 +23,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Prepare Timezone & Environment Variables
+      - name: Prepare Timezone & Check Existing Release Tag
+        id: check_tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           sudo rm -f /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
@@ -37,7 +40,24 @@ jobs:
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
+          # Check if tag already exists on GitHub
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
+
+          FORCE_BUILD="${{ github.event.inputs.force_build }}"
+          echo "Tag: ${KERNEL_VERSION} | Release check HTTP status: ${HTTP_STATUS}"
+
+          if [ "$HTTP_STATUS" = "200" ] && [ "$FORCE_BUILD" != "true" ]; then
+            echo "Release ${KERNEL_VERSION} already exists for today. Skipping build cleanly."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "Proceeding with kernel compilation..."
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Install Dependencies
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
@@ -46,6 +66,7 @@ jobs:
             zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude
 
       - name: Setup Neutron Clang & GCC Toolchains
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           mkdir -p clang && cd clang
           curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
@@ -62,10 +83,15 @@ jobs:
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
       - name: Fetch Patched SM6150 Kernel Source
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 23.2 kernel_src
+          cd kernel_src
+          TREE_SHA=$(git rev-parse --short HEAD)
+          echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
 
       - name: Build Kernel
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           cd kernel_src
           export ARCH=arm64
@@ -84,6 +110,7 @@ jobs:
             CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
 
       - name: Package Flashable Zip with AnyKernel3
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/Anykernel3.git -b reforge AnyKernel3
           
@@ -98,7 +125,8 @@ jobs:
           cd AnyKernel3
           zip -r "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
 
-      - name: Generate Checksums & Export Release Body
+      - name: Generate Checksums & Detailed Release Body
+        if: steps.check_tag.outputs.skip_build != 'true'
         run: |
           SHA256_VAL=$(sha256sum "${{ env.ZIP_NAME }}" | awk '{print $1}')
           echo "${SHA256_VAL}  ${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
@@ -106,20 +134,39 @@ jobs:
           cat << EOF > release_notes.md
           ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (\`sweet\` / \`sweetin\`)
 
+          A high-performance, security-focused Linux kernel built for daily usage on AOSP-based custom ROMs.
+
+          #### Build & Component Specifications
           - **Kernel Version:** \`${{ env.KERNEL_VERSION }}\`
           - **Build Timestamp:** \`${{ env.BUILD_TIME }}\` (WIB)
-          - **Toolchain:** \`Neutron Clang + Greenforce GCC (ARM64 / ARM32)\`
-          - **Base Tree:** \`LineageOS 23.2 (SM6150 CAF Base)\`
-          - **Root Solution:** \`KernelSU Next (In-Tree Syscall Hook)\`
-          - **Package Format:** \`AnyKernel3 Flashable ZIP\`
+          - **Source Tree Base:** \`LineageOS 23.2 / CAF SM6150 (Commit: ${{ env.TREE_SHA }})\`
+          - **Target Architecture:** \`arm64 (Snapdragon 732G)\`
+          - **Compiler Toolchain:** \`Neutron Clang (LLVM Integrated Assembler)\`
+          - **Cross-Compilers:** \`Greenforce GCC 64-bit (aarch64-elf) & 32-bit (arm-eabi)\`
 
-          #### SHA-256 Checksum:
+          #### Integrated Kernel Patches & Features
+          - **KernelSU Next Integration:** Native in-tree root syscall interception.
+            - *Required Manager:* [KernelSU Next Manager APK](https://github.com/rifsxd/KernelSU-Next/releases) (Recommended build: **v1.0.5+** or **latest Next release**).
+          - **SusFS Patch (v2.2.0 NON-GKI):** Kernel-level mount & path concealment for advanced root-hiding and Play Integrity compliance.
+          - **SELinux Security:** Enforcing-ready with nosuid ksud exec permissions.
+          - **Power & Thermal Tuning:** Ultra Low Power State mode and low-frequency llcc-bw bus scaling for battery efficiency.
+          - **Network Optimization:** TCP Westwood / BBR congestion control enabled.
+
+          #### Flashing Instructions
+          1. Download \`${{ env.ZIP_NAME }}\`.
+          2. Reboot to Custom Recovery (TWRP / OrangeFox / Lineage Recovery).
+          3. *(Recommended)* Backup \`boot\` and \`dtbo\` partitions.
+          4. Flash the zip file and reboot system.
+          5. Install the KernelSU Next Manager app to manage superuser permissions.
+
+          #### Cryptographic Checksum
           \`\`\`text
-          ${SHA256_VAL}
+          SHA-256: ${SHA256_VAL}
           \`\`\`
           EOF
 
       - name: Upload Build Artifacts
+        if: steps.check_tag.outputs.skip_build != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
@@ -128,7 +175,7 @@ jobs:
             ${{ env.ZIP_NAME }}.sha256
 
       - name: Create Official GitHub Release
-        if: ${{ inputs.release_build || github.event_name == 'push' }}
+        if: steps.check_tag.outputs.skip_build != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.KERNEL_VERSION }}
