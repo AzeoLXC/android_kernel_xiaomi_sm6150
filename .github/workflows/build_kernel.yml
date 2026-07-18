@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   build-kernel:
-    name: Compile Kernel (AOSP Clang)
+    name: Compile Kernel (Proton Clang)
     runs-on: ubuntu-latest
 
     steps:
@@ -53,17 +53,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison ca-certificates curl flex gcc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             git libc6-dev libssl-dev make openssl python3 python-is-python3 libelf-dev xz-utils \
-            zlib1g-dev cpio kmod libncurses5-dev lz4
+            zlib1g-dev cpio kmod libncurses5-dev lz4 libtinfo5
 
-      - name: Download AOSP Clang Toolchain (r450784d / AOSP 14-15 LTS)
+      - name: Download Proton Clang Toolchain
         run: |
-          mkdir -p clang-aosp
-          cd clang-aosp
-          echo "Fetching verified AOSP Clang toolchain..."
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz
-          tar -xzf clang-r450784d.tar.gz
-          rm -f clang-r450784d.tar.gz
-          echo "CLANG_PATH=$(pwd)/bin" >> $GITHUB_ENV
+          mkdir -p clang-toolchain
+          echo "Fetching verified Proton Clang LLVM toolchain..."
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git clang-toolchain
+          echo "CLANG_PATH=$(pwd)/clang-toolchain/bin" >> $GITHUB_ENV
 
       - name: Clone LineageOS SM6150 Kernel Source
         run: |
@@ -81,7 +78,6 @@ jobs:
           export PATH="${{ env.CLANG_PATH }}:${PATH}"
           export ARCH=arm64
           export SUBARCH=arm64
-          export HEADER_ARCH=arm64
 
           # Combine CAF sdmsteppe-perf and sweet config overrides
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- vendor/sdmsteppe-perf_defconfig vendor/sweet.config
@@ -141,7 +137,7 @@ jobs:
             
             - **Kernel Version:** `${{ env.KERNEL_VERSION }}`
             - **Built Date:** `${{ env.BUILD_DATE }}`
-            - **Toolchain:** `AOSP Clang 14/15 LTS`
+            - **Toolchain:** `Proton Clang LLVM`
             - **KernelSU Next:** Integrated (`${{ inputs.ksu_branch || 'next' }}`)
             - **Flashing Method:** AnyKernel3 Flashable ZIP (via TWRP/OrangeFox)
             
