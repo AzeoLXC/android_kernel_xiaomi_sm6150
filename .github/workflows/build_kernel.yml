@@ -42,28 +42,27 @@ jobs:
       - name: Set Environment Variables & Build Date
         run: |
           BUILD_DATE=$(date +'%Y.%m.%d')
-          BUILD_TIME=$(date +'%H%M')
           KERNEL_VERSION="v1.0.0-${BUILD_DATE}"
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=AzeoKernel-sweet-${KERNEL_VERSION}.zip" >> $GITHUB_ENV
 
-      - name: Install Build Dependencies
+      - name: Install Build Dependencies & Toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison ca-certificates curl flex gcc git libc6-dev libssl-dev make \
-            openssl python3 python3-pip python-is-python3 libelf-dev xz-utils \
-            zlib1g-dev cpio kmod
+            bc bison ca-certificates curl flex gcc gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            git libc6-dev libssl-dev make openssl python3 python-is-python3 libelf-dev xz-utils \
+            zlib1g-dev cpio kmod libncurses5-dev lz4
 
-      - name: Download AOSP Clang Toolchain
+      - name: Download AOSP Clang Toolchain (r450784d / AOSP 14-15 LTS)
         run: |
           mkdir -p clang-aosp
           cd clang-aosp
-          echo "Fetching AOSP Clang 18..."
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r522817.tar.gz
-          tar -xzf clang-r522817.tar.gz
-          rm -f clang-r522817.tar.gz
+          echo "Fetching verified AOSP Clang toolchain..."
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz
+          tar -xzf clang-r450784d.tar.gz
+          rm -f clang-r450784d.tar.gz
           echo "CLANG_PATH=$(pwd)/bin" >> $GITHUB_ENV
 
       - name: Clone LineageOS SM6150 Kernel Source
@@ -76,7 +75,7 @@ jobs:
           echo "Integrating KernelSU-Next..."
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s ${{ inputs.ksu_branch || 'next' }}
 
-      - name: Compile Kernel Image (sweet_defconfig)
+      - name: Compile Kernel Image (vendor/sdmsteppe-perf_defconfig + vendor/sweet.config)
         run: |
           cd kernel_src
           export PATH="${{ env.CLANG_PATH }}:${PATH}"
@@ -84,7 +83,8 @@ jobs:
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
 
-          make O=out sweet_user_defconfig CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          # Combine CAF sdmsteppe-perf and sweet config overrides
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- vendor/sdmsteppe-perf_defconfig vendor/sweet.config
 
           # Apply config tweaks for daily driver & KernelSU
           scripts/config --file out/.config \
@@ -95,13 +95,9 @@ jobs:
 
           echo "Starting compilation with $(nproc) cores..."
           make -j$(nproc) O=out \
+            ARCH=arm64 \
             CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             Image.gz-dtb dtbo.img
@@ -111,7 +107,6 @@ jobs:
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git anykernel
           cd anykernel
           
-          # Customise AnyKernel3 banner for Azeo Kernel
           sed -i 's/kernel.string=.*/kernel.string=Azeo Kernel for Redmi Note 10 Pro (sweet)/g' anykernel.sh
           sed -i 's/device.name1=.*/device.name1=sweet/g' anykernel.sh
           sed -i 's/device.name2=.*/device.name2=sweetin/g' anykernel.sh
@@ -146,7 +141,7 @@ jobs:
             
             - **Kernel Version:** `${{ env.KERNEL_VERSION }}`
             - **Built Date:** `${{ env.BUILD_DATE }}`
-            - **Toolchain:** `AOSP Clang 18 (r522817)`
+            - **Toolchain:** `AOSP Clang 14/15 LTS`
             - **KernelSU Next:** Integrated (`${{ inputs.ksu_branch || 'next' }}`)
             - **Flashing Method:** AnyKernel3 Flashable ZIP (via TWRP/OrangeFox)
             
