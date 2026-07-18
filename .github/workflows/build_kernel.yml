@@ -98,11 +98,26 @@ jobs:
           cd AnyKernel3
           zip -r "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
 
-      - name: Generate Checksums
+      - name: Generate Checksums & Export Release Body
         run: |
-          sha256sum "${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
-          echo "Generated SHA256:"
-          cat "${{ env.ZIP_NAME }}.sha256"
+          SHA256_VAL=$(sha256sum "${{ env.ZIP_NAME }}" | awk '{print $1}')
+          echo "${SHA256_VAL}  ${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
+          
+          cat << EOF > release_notes.md
+          ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (\`sweet\` / \`sweetin\`)
+
+          - **Kernel Version:** \`${{ env.KERNEL_VERSION }}\`
+          - **Build Timestamp:** \`${{ env.BUILD_TIME }}\` (WIB)
+          - **Toolchain:** \`Neutron Clang + Greenforce GCC (ARM64 / ARM32)\`
+          - **Base Tree:** \`LineageOS 23.2 (SM6150 CAF Base)\`
+          - **Root Solution:** \`KernelSU Next (In-Tree Syscall Hook)\`
+          - **Package Format:** \`AnyKernel3 Flashable ZIP\`
+
+          #### SHA-256 Checksum:
+          \`\`\`text
+          ${SHA256_VAL}
+          \`\`\`
+          EOF
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -118,18 +133,7 @@ jobs:
         with:
           tag_name: ${{ env.KERNEL_VERSION }}
           name: "Azeo Kernel — ${{ env.KERNEL_VERSION }}"
-          body: |
-            ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (`sweet` / `sweetin`)
-            
-            - **Kernel Version:** `${{ env.KERNEL_VERSION }}`
-            - **Compiler:** `Neutron Clang + Greenforce GCC Toolchains`
-            - **KernelSU Next:** Native in-tree integrated
-            - **Packaging:** AnyKernel3 Flashable ZIP
-            
-            #### Checksum:
-            ```text
-            $(cat ${{ env.ZIP_NAME }}.sha256)
-            ```
+          body_path: release_notes.md
           files: |
             ${{ env.ZIP_NAME }}
             ${{ env.ZIP_NAME }}.sha256
