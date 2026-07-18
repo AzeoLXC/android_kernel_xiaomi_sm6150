@@ -1,12 +1,14 @@
 name: Build & Package Azeo Kernel
 
 on:
+  schedule:
+    - cron: "0 0 * * *"
   push:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
       force_build:
-        description: "Force rebuild even if release tag exists for today"
+        description: "Force rebuild even if source is unchanged or tag exists for today"
         required: false
         default: false
         type: boolean
@@ -23,8 +25,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
-      - name: Prepare Timezone & Check Existing Release Tag
-        id: check_tag
+      - name: Check Upstream Commit & Local Release State
+        id: check_state
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -40,33 +42,59 @@ jobs:
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
-          # Check if tag already exists on GitHub
+          # 1. Fetch latest commit SHA from upstream repo (branch 23.2)
+          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
+          
+          if [ -z "$UPSTREAM_SHA" ]; then
+            echo "Warning: Failed to fetch upstream SHA via API. Falling back to default clone check."
+            UPSTREAM_SHA="unknown"
+          fi
+
+          echo "Latest Upstream SHA: ${UPSTREAM_SHA}"
+          echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
+
+          # 2. Check last processed SHA recorded in repo
+          LAST_SHA=""
+          if [ -f ".last_upstream_sha" ]; then
+            LAST_SHA=$(cat .last_upstream_sha)
+          fi
+
+          # 3. Check if release tag for today already exists
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
 
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
-          echo "Tag: ${KERNEL_VERSION} | Release check HTTP status: ${HTTP_STATUS}"
+          EVENT_NAME="${{ github.event_name }}"
 
-          if [ "$HTTP_STATUS" = "200" ] && [ "$FORCE_BUILD" != "true" ]; then
+          echo "Event: ${EVENT_NAME} | Tag HTTP: ${HTTP_STATUS} | Last SHA: ${LAST_SHA} | Upstream SHA: ${UPSTREAM_SHA}"
+
+          # Decision Matrix
+          if [ "$FORCE_BUILD" = "true" ]; then
+            echo "Force build enabled. Proceeding with compilation."
+            echo "skip_build=false" >> $GITHUB_OUTPUT
+          elif [ "$EVENT_NAME" = "schedule" ] && [ "$LAST_SHA" = "$UPSTREAM_SHA" ] && [ "$UPSTREAM_SHA" != "unknown" ]; then
+            echo "CRON Watcher: No new upstream commits detected (${UPSTREAM_SHA}). Skipping build cleanly."
+            echo "skip_build=true" >> $GITHUB_OUTPUT
+          elif [ "$HTTP_STATUS" = "200" ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
             echo "Release ${KERNEL_VERSION} already exists for today. Skipping build cleanly."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
-            echo "Proceeding with kernel compilation..."
+            echo "New commit or manual trigger detected. Proceeding with compilation."
             echo "skip_build=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Install Dependencies
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
             bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev \
             make openssl python3 python-is-python3 libelf-dev xz-utils \
-            zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude
+            zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude jq
 
       - name: Setup Neutron Clang & GCC Toolchains
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           mkdir -p clang && cd clang
           curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
@@ -83,15 +111,17 @@ jobs:
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
       - name: Fetch Patched SM6150 Kernel Source
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 23.2 kernel_src
           cd kernel_src
           TREE_SHA=$(git rev-parse --short HEAD)
+          FULL_SHA=$(git rev-parse HEAD)
           echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
+          echo "FULL_SHA=${FULL_SHA}" >> $GITHUB_ENV
 
       - name: Build Kernel
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           cd kernel_src
           export ARCH=arm64
@@ -110,7 +140,7 @@ jobs:
             CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
 
       - name: Package Flashable Zip with AnyKernel3
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/Anykernel3.git -b reforge AnyKernel3
           
@@ -126,7 +156,7 @@ jobs:
           zip -r "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
 
       - name: Generate Checksums & Detailed Release Body
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           SHA256_VAL=$(sha256sum "${{ env.ZIP_NAME }}" | awk '{print $1}')
           echo "${SHA256_VAL}  ${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
@@ -166,7 +196,7 @@ jobs:
           EOF
 
       - name: Upload Build Artifacts
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ZIP_NAME }}
@@ -175,7 +205,7 @@ jobs:
             ${{ env.ZIP_NAME }}.sha256
 
       - name: Create Official GitHub Release
-        if: steps.check_tag.outputs.skip_build != 'true'
+        if: steps.check_state.outputs.skip_build != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.KERNEL_VERSION }}
@@ -186,3 +216,13 @@ jobs:
             ${{ env.ZIP_NAME }}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Persist Upstream Processed SHA State
+        if: steps.check_state.outputs.skip_build != 'true'
+        run: |
+          echo "${{ env.FULL_SHA }}" > .last_upstream_sha
+          git config --global user.name "Azeo"
+          git config --global user.email "azeolxc@gmail.com"
+          git add .last_upstream_sha
+          git commit -m "chore(sync): update processed upstream commit SHA [skip ci]" || echo "No state changes to commit"
+          git push origin main || echo "State push skipped"
