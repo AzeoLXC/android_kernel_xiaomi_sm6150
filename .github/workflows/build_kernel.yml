@@ -37,7 +37,7 @@ jobs:
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
 
-          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/23.2" | jq -r '.sha // empty')
+          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/16" | jq -r '.sha // empty')
           if [ -z "$UPSTREAM_SHA" ]; then
             UPSTREAM_SHA="unknown"
           fi
