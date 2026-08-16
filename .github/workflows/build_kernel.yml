@@ -127,7 +127,7 @@ jobs:
       - name: Fetch SM6150 Kernel Source & Rebrand Defconfig
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
-          git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 23.2 kernel_src
+          git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 16 kernel_src
           cd kernel_src
           TREE_SHA=$(git rev-parse --short HEAD)
           FULL_SHA=$(git rev-parse HEAD)
