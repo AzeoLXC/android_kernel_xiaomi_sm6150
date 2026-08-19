@@ -104,10 +104,10 @@ jobs:
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev \
-            make openssl python3 python-is-python3 libelf-dev xz-utils \
-            zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude jq wget
+            make openssl python3 python-is-python3 libelf-dev \
+            zlib1g-dev kmod libncurses5-dev lz4 aria2 tar jq wget
 
       - name: Setup ZyCromerZ Clang & GCC Toolchains
         if: steps.check_state.outputs.skip_build != 'true'
@@ -160,7 +160,19 @@ jobs:
           # Ensure CONFIG_LOCALVERSION overrides are locked in .config
           scripts/config --file out/.config \
             --set-str CONFIG_LOCALVERSION "-AzeoKernel" \
-            -d CONFIG_LOCALVERSION_AUTO
+            -d CONFIG_LOCALVERSION_AUTO \
+            -e CONFIG_KSU \
+            -e CONFIG_KSU_SUSFS \
+            -e CONFIG_KSU_SUSFS_SUS_PATH \
+            -e CONFIG_KSU_SUSFS_SUS_MOUNT \
+            -e CONFIG_KSU_SUSFS_SUS_KSTAT \
+            -e CONFIG_KSU_SUSFS_TRY_UMOUNT \
+            -e CONFIG_KSU_SUSFS_SPOOF_UNAME \
+            -e CONFIG_KSU_SUSFS_ENABLE_LOG \
+            -e CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS \
+            -e CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG \
+            -e CONFIG_KSU_SUSFS_OPEN_REDIRECT \
+            -e CONFIG_KSU_SUSFS_SUS_MAP
 
           make -j$(nproc --all) O=out ARCH=arm64 \
             LLVM=1 \
