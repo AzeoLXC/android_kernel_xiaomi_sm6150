@@ -1,14 +1,10 @@
 name: Build & Package Azeo Kernel
 
 on:
-  schedule:
-    - cron: "0 0 * * *"
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       force_build:
-        description: "Force rebuild even if source is unchanged or tag exists for today"
+        description: "Force rebuild even if tag exists for today"
         required: false
         default: false
         type: boolean
@@ -82,16 +78,12 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
 
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
-          EVENT_NAME="${{ github.event_name }}"
 
           if [ "$FORCE_BUILD" = "true" ]; then
             echo "Force build enabled. Proceeding."
             echo "skip_build=false" >> $GITHUB_OUTPUT
-          elif [ "$EVENT_NAME" = "schedule" ] && [ "$LAST_SHA" = "$UPSTREAM_SHA" ] && [ "$UPSTREAM_SHA" != "unknown" ]; then
-            echo "CRON: Upstream unchanged (${SHORT_SHA}). Skipping cleanly."
-            echo "skip_build=true" >> $GITHUB_OUTPUT
-          elif [ "$HTTP_STATUS" = "200" ] && [ "$EVENT_NAME" != "workflow_dispatch" ]; then
-            echo "Release ${KERNEL_VERSION} already published. Skipping cleanly."
+          elif [ "$HTTP_STATUS" = "200" ]; then
+            echo "Release ${KERNEL_VERSION} already published. Use force_build=true to overwrite."
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
             echo "Proceeding with compilation for ${KERNEL_VERSION}."
