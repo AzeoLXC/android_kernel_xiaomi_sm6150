@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   build-kernel:
-    name: Compile Kernel (Neutron Clang)
+    name: Compile Kernel (ZyCromerZ Clang 17)
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +36,7 @@ jobs:
           sudo ln -s /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
+          FORMATTED_BUILD_DATE="\"$(TZ=Asia/Jakarta date '+%b %d %Y')\""
 
           UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/16" | jq -r '.sha // empty')
           if [ -z "$UPSTREAM_SHA" ]; then
@@ -73,6 +74,7 @@ jobs:
 
           echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          echo "FORMATTED_BUILD_DATE=${FORMATTED_BUILD_DATE}" >> $GITHUB_ENV
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
@@ -105,16 +107,15 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev \
             make openssl python3 python-is-python3 libelf-dev xz-utils \
-            zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude jq
+            zlib1g-dev kmod libncurses5-dev lz4 aria2 perl tar aptitude jq wget
 
-      - name: Setup Neutron Clang & GCC Toolchains
+      - name: Setup ZyCromerZ Clang & GCC Toolchains
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           mkdir -p clang && cd clang
-          curl -LSs "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman" -o antman
-          chmod a+x antman
-          ./antman -S
-          ./antman --patch=glibc
+          wget -q https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz
+          tar -xzf Clang-17.0.0-20230725.tar.gz
+          rm Clang-17.0.0-20230725.tar.gz
           cd ..
 
           git clone --depth=1 https://github.com/greenforce-project/gcc-arm64 -b main gcc64
@@ -124,7 +125,7 @@ jobs:
           echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
-      - name: Fetch SM6150 Kernel Source & Rebrand Defconfig
+      - name: Fetch SM6150 Kernel Source & Setup KernelSU-Next
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 16 kernel_src
@@ -133,6 +134,9 @@ jobs:
           FULL_SHA=$(git rev-parse HEAD)
           echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
           echo "FULL_SHA=${FULL_SHA}" >> $GITHUB_ENV
+
+          # Ingest KernelSU-Next syscall hook
+          curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU-Next/stable/kernel/setup.sh" | bash -s syscall
 
           # 1. Disable CONFIG_LOCALVERSION_AUTO to remove '-dirty' and git hash suffix
           # 2. Set CONFIG_LOCALVERSION to '-AzeoKernel' directly in defconfig
@@ -148,6 +152,8 @@ jobs:
           export KBUILD_BUILD_USER="Azeo"
           export KBUILD_BUILD_HOST="AzeoLab"
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
+          export BUILD_DATE=${{ env.FORMATTED_BUILD_DATE }}
+          export CFLAGS_EXTRA="-DBUILD_DATE=${{ env.FORMATTED_BUILD_DATE }}"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
 
@@ -204,7 +210,7 @@ jobs:
           - **Build Timestamp:** \`${{ env.BUILD_TIME }}\` (WIB)
           - **Source Tree Base:** \`LineageOS 23.2 / CAF SM6150 (Commit: ${{ env.TREE_SHA }})\`
           - **Target Architecture:** \`arm64 (Snapdragon 732G)\`
-          - **Compiler Toolchain:** \`Neutron Clang (LLVM Integrated Assembler)\`
+          - **Compiler Toolchain:** \`ZyCromerZ Clang 17 (LLVM Integrated Assembler)\`
           - **Cross-Compilers:** \`Greenforce GCC 64-bit (aarch64-elf) & 32-bit (arm-eabi)\`
 
           #### Integrated Kernel Patches & Features
