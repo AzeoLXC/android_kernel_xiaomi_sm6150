@@ -37,7 +37,7 @@ jobs:
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
 
-          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/16" | jq -r '.sha // empty')
+          UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/stable" | jq -r '.sha // empty')
           if [ -z "$UPSTREAM_SHA" ]; then
             UPSTREAM_SHA="unknown"
           fi
@@ -126,7 +126,7 @@ jobs:
       - name: Fetch SM6150 Kernel Source & Setup KernelSU-Next
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
-          git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b 16 kernel_src
+          git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b stable kernel_src
           cd kernel_src
           TREE_SHA=$(git rev-parse --short HEAD)
           FULL_SHA=$(git rev-parse HEAD)
@@ -152,6 +152,10 @@ jobs:
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
+          scripts/kconfig/merge_config.sh \
+            -O out \
+            arch/arm64/configs/vendor/sweet_defconfig \
+            arch/arm64/configs/vendor/droidspaces_defconfig
 
           # Ensure CONFIG_LOCALVERSION overrides are locked in .config
           scripts/config --file out/.config \
@@ -170,13 +174,15 @@ jobs:
             -e CONFIG_KSU_SUSFS_OPEN_REDIRECT \
             -e CONFIG_KSU_SUSFS_SUS_MAP
 
+          make O=out ARCH=arm64 olddefconfig
+
           make -j$(nproc --all) O=out ARCH=arm64 \
             LLVM=1 \
             LLVM_IAS=1 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
-            CROSS_COMPILE=aarch64-elf- \
-            CROSS_COMPILE_ARM32=arm-eabi-
+            CLANG_TRIPLE=$CLANG_PATH/aarch64-linux-gnu- \
+            CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
+            CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
 
       - name: Package Flashable Zip with AnyKernel3 (Full Custom Branding)
         if: steps.check_state.outputs.skip_build != 'true'
