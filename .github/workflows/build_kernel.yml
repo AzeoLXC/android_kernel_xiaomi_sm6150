@@ -36,7 +36,6 @@ jobs:
           sudo ln -s /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
           BUILD_TIME=$(TZ=Asia/Jakarta date '+%Y%m%d-%H%M')
           BUILD_DATE=$(TZ=Asia/Jakarta date '+%Y.%m.%d')
-          FORMATTED_BUILD_DATE="\"$(TZ=Asia/Jakarta date '+%b %d %Y')\""
 
           UPSTREAM_SHA=$(curl -s "https://api.github.com/repos/manipvlator/los_kernel_xiaomi_sm6150/commits/16" | jq -r '.sha // empty')
           if [ -z "$UPSTREAM_SHA" ]; then
@@ -74,7 +73,6 @@ jobs:
 
           echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
-          echo "FORMATTED_BUILD_DATE=${FORMATTED_BUILD_DATE}" >> $GITHUB_ENV
           echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
           echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
@@ -152,8 +150,6 @@ jobs:
           export KBUILD_BUILD_USER="Azeo"
           export KBUILD_BUILD_HOST="AzeoLab"
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
-          export BUILD_DATE=${{ env.FORMATTED_BUILD_DATE }}
-          export CFLAGS_EXTRA="-DBUILD_DATE=${{ env.FORMATTED_BUILD_DATE }}"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
 
@@ -178,9 +174,9 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CC=clang \
-            CLANG_TRIPLE=$CLANG_PATH/aarch64-linux-gnu- \
-            CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
-            CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-elf- \
+            CROSS_COMPILE_ARM32=arm-eabi-
 
       - name: Package Flashable Zip with AnyKernel3 (Full Custom Branding)
         if: steps.check_state.outputs.skip_build != 'true'
