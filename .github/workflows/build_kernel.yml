@@ -144,10 +144,6 @@ jobs:
           export KBUILD_COMPILER_STRING="$CLANG_PATH/bin/clang"
 
           make O=out ARCH=arm64 vendor/sweet_defconfig
-          scripts/kconfig/merge_config.sh \
-            -O out \
-            arch/arm64/configs/vendor/sweet_defconfig \
-            arch/arm64/configs/vendor/droidspaces_defconfig
 
           # Ensure CONFIG_LOCALVERSION overrides are locked in .config
           scripts/config --file out/.config \
