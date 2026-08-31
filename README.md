@@ -61,7 +61,7 @@ Builds are executed via GitHub Actions (`workflow_dispatch`):
 [ Fetch ZyCromerZ Clang 17 & GCC Toolchains ]
               │
               ▼
-[ Clone SM6150 Source & Ingest KernelSU-Next Syscall ]
+[ Sync source-code Submodule & Ingest KernelSU-Next Syscall ]
               │
               ▼
 [ Generate vendor/sweet_defconfig & Apply Kconfig Flags ]

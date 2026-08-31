@@ -18,10 +18,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repository with Submodules
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          submodules: recursive
 
       - name: Resolve Dynamic Version & Check Upstream State
         id: check_state
@@ -115,11 +116,13 @@ jobs:
           echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
-      - name: Fetch SM6150 Kernel Source & Setup KernelSU-Next
+      - name: Sync Submodule & Setup KernelSU-Next
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
-          git clone --depth=1 https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git -b stable kernel_src
-          cd kernel_src
+          git submodule update --init --recursive --remote
+          cd source-code
+          git checkout stable
+          git pull origin stable
           TREE_SHA=$(git rev-parse --short HEAD)
           FULL_SHA=$(git rev-parse HEAD)
           echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
@@ -136,7 +139,7 @@ jobs:
       - name: Build Kernel
         if: steps.check_state.outputs.skip_build != 'true'
         run: |
-          cd kernel_src
+          cd source-code
           export ARCH=arm64
           export PATH="$CLANG_PATH/bin:$GCC64_PATH/bin:$GCC32_PATH/bin:$PATH"
           export KBUILD_BUILD_USER="Azeo"
@@ -189,9 +192,9 @@ jobs:
           sed -i 's/device.name1=.*/device.name1=sweet/g' AnyKernel3/anykernel.sh
           sed -i 's/device.name2=.*/device.name2=sweetin/g' AnyKernel3/anykernel.sh
 
-          cp kernel_src/out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
-          cp kernel_src/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img 2>/dev/null || true
-          cp kernel_src/out/arch/arm64/boot/dtb.img AnyKernel3/dtb.img 2>/dev/null || true
+          cp source-code/out/arch/arm64/boot/Image.gz AnyKernel3/Image.gz
+          cp source-code/out/arch/arm64/boot/dtbo.img AnyKernel3/dtbo.img 2>/dev/null || true
+          cp source-code/out/arch/arm64/boot/dtb.img AnyKernel3/dtb.img 2>/dev/null || true
 
           cd AnyKernel3
           zip -r "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
@@ -262,6 +265,6 @@ jobs:
           echo "${{ env.FULL_SHA }}" > .last_upstream_sha
           git config --global user.name "Azeo"
           git config --global user.email "azeolxc@gmail.com"
-          git add .last_upstream_sha
-          git commit -m "chore(sync): update processed upstream commit SHA [skip ci]" || echo "No state changes to commit"
+          git add .last_upstream_sha source-code
+          git commit -m "chore(sync): update processed upstream commit SHA & submodule [skip ci]" || echo "No state changes to commit"
           git push origin main || echo "State push skipped"

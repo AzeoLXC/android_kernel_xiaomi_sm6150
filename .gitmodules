@@ -1,0 +1,4 @@
+[submodule "source-code"]
+	path = source-code
+	url = https://github.com/manipvlator/los_kernel_xiaomi_sm6150.git
+	branch = stable
