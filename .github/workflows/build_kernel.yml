@@ -13,9 +13,17 @@ permissions:
   contents: write
 
 jobs:
-  build-kernel:
-    name: Compile Kernel (ZyCromerZ Clang 17)
+  upstream:
+    name: 1. Check Upstream & Sync
     runs-on: ubuntu-latest
+    outputs:
+      skip_build: ${{ steps.check_state.outputs.skip_build }}
+      kernel_version: ${{ steps.check_state.outputs.kernel_version }}
+      zip_name: ${{ steps.check_state.outputs.zip_name }}
+      build_time: ${{ steps.check_state.outputs.build_time }}
+      upstream_sha: ${{ steps.check_state.outputs.upstream_sha }}
+      tree_sha: ${{ steps.check_state.outputs.tree_sha }}
+      full_sha: ${{ steps.check_state.outputs.full_sha }}
 
     steps:
       - name: Checkout Repository with Submodules
@@ -38,7 +46,6 @@ jobs:
           if [ -z "$UPSTREAM_SHA" ]; then
             UPSTREAM_SHA="unknown"
           fi
-          SHORT_SHA=$(echo "$UPSTREAM_SHA" | cut -c1-7)
 
           LATEST_TAG=$(git tag -l "v*.*.*" | sort -V | tail -n 1)
           if [ -z "$LATEST_TAG" ]; then
@@ -68,12 +75,6 @@ jobs:
           KERNEL_VERSION="v${BASE_MAJOR}.${NEW_MINOR}.${NEW_PATCH}-${BUILD_DATE}"
           ZIP_NAME="AzeoKernel-sweet-${KERNEL_VERSION}.zip"
 
-          echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
-          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
-          echo "KERNEL_VERSION=${KERNEL_VERSION}" >> $GITHUB_ENV
-          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-          echo "UPSTREAM_SHA=${UPSTREAM_SHA}" >> $GITHUB_ENV
-
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
@@ -82,26 +83,52 @@ jobs:
 
           if [ "$FORCE_BUILD" = "true" ]; then
             echo "Force build enabled. Proceeding."
-            echo "skip_build=false" >> $GITHUB_OUTPUT
+            SKIP_BUILD="false"
           elif [ "$HTTP_STATUS" = "200" ]; then
             echo "Release ${KERNEL_VERSION} already published. Use force_build=true to overwrite."
-            echo "skip_build=true" >> $GITHUB_OUTPUT
+            SKIP_BUILD="true"
           else
             echo "Proceeding with compilation for ${KERNEL_VERSION}."
-            echo "skip_build=false" >> $GITHUB_OUTPUT
+            SKIP_BUILD="false"
           fi
 
+          git submodule update --init --recursive --remote
+          cd source-code
+          git checkout stable
+          git pull origin stable
+          TREE_SHA=$(git rev-parse --short HEAD)
+          FULL_SHA=$(git rev-parse HEAD)
+
+          echo "skip_build=${SKIP_BUILD}" >> $GITHUB_OUTPUT
+          echo "kernel_version=${KERNEL_VERSION}" >> $GITHUB_OUTPUT
+          echo "zip_name=${ZIP_NAME}" >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "upstream_sha=${UPSTREAM_SHA}" >> $GITHUB_OUTPUT
+          echo "tree_sha=${TREE_SHA}" >> $GITHUB_OUTPUT
+          echo "full_sha=${FULL_SHA}" >> $GITHUB_OUTPUT
+
+  build:
+    name: 2. Compile Kernel & Package
+    needs: upstream
+    if: needs.upstream.outputs.skip_build != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository with Submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
       - name: Install Dependencies
-        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev \
             make openssl python3 python-is-python3 libelf-dev \
-            zlib1g-dev kmod libncurses5-dev lz4 aria2 tar jq wget
+            zlib1g-dev kmod libncurses5-dev lz4 aria2 tar jq wget zip
 
       - name: Setup ZyCromerZ Clang & GCC Toolchains
-        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           mkdir -p clang && cd clang
           wget -q https://github.com/ZyCromerZ/Clang/releases/download/17.0.0-20230725-release/Clang-17.0.0-20230725.tar.gz
@@ -117,16 +144,11 @@ jobs:
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
       - name: Sync Submodule & Setup KernelSU-Next
-        if: steps.check_state.outputs.skip_build != 'true'
         run: |
           git submodule update --init --recursive --remote
           cd source-code
           git checkout stable
           git pull origin stable
-          TREE_SHA=$(git rev-parse --short HEAD)
-          FULL_SHA=$(git rev-parse HEAD)
-          echo "TREE_SHA=${TREE_SHA}" >> $GITHUB_ENV
-          echo "FULL_SHA=${FULL_SHA}" >> $GITHUB_ENV
 
           # Ingest KernelSU-Next syscall hook
           curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU-Next/stable/kernel/setup.sh" | bash -s syscall
@@ -136,8 +158,7 @@ jobs:
           sed -i 's/CONFIG_LOCALVERSION="-reforge"/CONFIG_LOCALVERSION="-AzeoKernel"/g' arch/arm64/configs/vendor/sweet_defconfig
           sed -i 's/CONFIG_LOCALVERSION_AUTO=y/CONFIG_LOCALVERSION_AUTO=n/g' arch/arm64/configs/vendor/sweet_defconfig
 
-      - name: Build Kernel
-        if: steps.check_state.outputs.skip_build != 'true'
+      - name: Build Kernel Image
         run: |
           cd source-code
           export ARCH=arm64
@@ -175,11 +196,12 @@ jobs:
             CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
             CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
 
-      - name: Package Flashable Zip with AnyKernel3 (Full Custom Branding)
-        if: steps.check_state.outputs.skip_build != 'true'
+      - name: Package Flashable Zip with AnyKernel3
+        env:
+          ZIP_NAME: ${{ needs.upstream.outputs.zip_name }}
         run: |
           git clone --depth=1 https://github.com/manipvlator/Anykernel3.git -b reforge AnyKernel3
-          
+
           # Customise AnyKernel3 Banner Text
           cat << 'EOF' > AnyKernel3/banner
           Azeo Kernel: boot sequence start...
@@ -197,14 +219,45 @@ jobs:
           cp source-code/out/arch/arm64/boot/dtb.img AnyKernel3/dtb.img 2>/dev/null || true
 
           cd AnyKernel3
-          zip -r "../${{ env.ZIP_NAME }}" * -x .git README.md *placeholder
+          zip -r "../${ZIP_NAME}" * -x .git README.md *placeholder
+          cd ..
 
-      - name: Generate Checksums & Detailed Release Body
-        if: steps.check_state.outputs.skip_build != 'true'
+          SHA256_VAL=$(sha256sum "${ZIP_NAME}" | awk '{print $1}')
+          echo "${SHA256_VAL}  ${ZIP_NAME}" > "${ZIP_NAME}.sha256"
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.upstream.outputs.zip_name }}
+          path: |
+            ${{ needs.upstream.outputs.zip_name }}
+            ${{ needs.upstream.outputs.zip_name }}.sha256
+
+  release:
+    name: 3. Create Release & Sync State
+    needs: [upstream, build]
+    if: needs.upstream.outputs.skip_build != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.upstream.outputs.zip_name }}
+
+      - name: Generate Release Notes
+        env:
+          KERNEL_VERSION: ${{ needs.upstream.outputs.kernel_version }}
+          BUILD_TIME: ${{ needs.upstream.outputs.build_time }}
+          TREE_SHA: ${{ needs.upstream.outputs.tree_sha }}
+          ZIP_NAME: ${{ needs.upstream.outputs.zip_name }}
         run: |
-          SHA256_VAL=$(sha256sum "${{ env.ZIP_NAME }}" | awk '{print $1}')
-          echo "${SHA256_VAL}  ${{ env.ZIP_NAME }}" > "${{ env.ZIP_NAME }}.sha256"
-          
+          SHA256_VAL=$(cat "${ZIP_NAME}.sha256" | awk '{print $1}')
           cat << EOF > release_notes.md
           ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (\`sweet\` / \`sweetin\`)
 
@@ -212,9 +265,9 @@ jobs:
 
           #### Build Specifications
           - Target SoC: Qualcomm Snapdragon 732G (SM6150 / \`sdmsteppe\`)
-          - Kernel Version: \`${{ env.KERNEL_VERSION }}\`
-          - Build Time: \`${{ env.BUILD_TIME }}\` (WIB)
-          - Upstream Commit: \`manipvlator/los_kernel_xiaomi_sm6150@${{ env.TREE_SHA }}\`
+          - Kernel Version: \`${KERNEL_VERSION}\`
+          - Build Time: \`${BUILD_TIME}\` (WIB)
+          - Upstream Commit: \`manipvlator/los_kernel_xiaomi_sm6150@${TREE_SHA}\`
           - Compiler: ZyCromerZ Clang 17.0.0 (LLVM Integrated Assembler)
           - Cross Compilers: Greenforce GCC 64-bit (\`aarch64-elf-\`) and 32-bit (\`arm-eabi-\`)
 
@@ -225,7 +278,7 @@ jobs:
           - Localversion locked to \`-AzeoKernel\` without \`-dirty\` suffix
 
           #### Flashing Instructions
-          1. Download \`${{ env.ZIP_NAME }}\` and verify with \`${{ env.ZIP_NAME }}.sha256\`.
+          1. Download \`${ZIP_NAME}\` and verify with \`${ZIP_NAME}.sha256\`.
           2. Reboot to custom recovery (TWRP / OrangeFox / Lineage Recovery).
           3. Flash the zip directly without wiping partitions.
           4. Reboot to system.
@@ -237,32 +290,24 @@ jobs:
           \`\`\`
           EOF
 
-      - name: Upload Build Artifacts
-        if: steps.check_state.outputs.skip_build != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ZIP_NAME }}
-          path: |
-            ${{ env.ZIP_NAME }}
-            ${{ env.ZIP_NAME }}.sha256
-
       - name: Create Official GitHub Release
-        if: steps.check_state.outputs.skip_build != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.KERNEL_VERSION }}
-          name: "Azeo Kernel — ${{ env.KERNEL_VERSION }}"
+          tag_name: ${{ needs.upstream.outputs.kernel_version }}
+          name: "Azeo Kernel — ${{ needs.upstream.outputs.kernel_version }}"
           body_path: release_notes.md
           files: |
-            ${{ env.ZIP_NAME }}
-            ${{ env.ZIP_NAME }}.sha256
+            ${{ needs.upstream.outputs.zip_name }}
+            ${{ needs.upstream.outputs.zip_name }}.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Persist Upstream Processed SHA State
-        if: steps.check_state.outputs.skip_build != 'true'
+        env:
+          FULL_SHA: ${{ needs.upstream.outputs.full_sha }}
         run: |
-          echo "${{ env.FULL_SHA }}" > .last_upstream_sha
+          git submodule update --init --remote source-code || true
+          echo "${FULL_SHA}" > .last_upstream_sha
           git config --global user.name "Azeo"
           git config --global user.email "azeolxc@gmail.com"
           git add .last_upstream_sha source-code

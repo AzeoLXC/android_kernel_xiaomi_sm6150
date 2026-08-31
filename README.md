@@ -49,28 +49,24 @@ Configured with in-kernel anti-detection mechanisms:
 
 ## CI/CD Pipeline
 
-Builds are executed via GitHub Actions (`workflow_dispatch`):
+Builds are executed via a 3-stage modular pipeline on GitHub Actions (`workflow_dispatch`):
 
 ```text
-[ Trigger: workflow_dispatch ]
+[ Stage 1: upstream ]
+  ├── Check upstream commits & semantic versioning
+  └── Sync source-code submodule
               │
               ▼
-[ Setup Build Environment & Dependencies ]
+[ Stage 2: build ]
+  ├── Provision ZyCromerZ Clang 17 & GCC toolchains
+  ├── Ingest KernelSU-Next syscall hook & apply SusFS Kconfig flags
+  ├── Compile Linux Kernel (Image.gz, dtbo.img, dtb.img)
+  └── Package AnyKernel3 zip & compute SHA-256
               │
               ▼
-[ Fetch ZyCromerZ Clang 17 & GCC Toolchains ]
-              │
-              ▼
-[ Sync source-code Submodule & Ingest KernelSU-Next Syscall ]
-              │
-              ▼
-[ Generate vendor/sweet_defconfig & Apply Kconfig Flags ]
-              │
-              ▼
-[ Compile Kernel (Image.gz, dtbo.img, dtb.img) ]
-              │
-              ▼
-[ Package AnyKernel3 Zip, Compute SHA-256 & Publish Release ]
+[ Stage 3: release ]
+  ├── Publish GitHub Release with changelog & assets
+  └── Persist submodule state & upstream SHA
 ```
 
 ---
