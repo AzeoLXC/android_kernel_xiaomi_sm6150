@@ -205,30 +205,28 @@ jobs:
           cat << EOF > release_notes.md
           ### Azeo Kernel for Redmi Note 10 Pro / Pro Max (\`sweet\` / \`sweetin\`)
 
-          A high-performance, security-focused Linux kernel built for daily usage on AOSP-based custom ROMs.
+          Production build of Azeo Kernel for Xiaomi Redmi Note 10 Pro and Pro Max on AOSP-based custom ROMs.
 
-          #### Build & Component Specifications
-          - **Kernel Version:** \`${{ env.KERNEL_VERSION }}\`
-          - **Build Timestamp:** \`${{ env.BUILD_TIME }}\` (WIB)
-          - **Source Tree Base:** \`LineageOS 23.2 / CAF SM6150 (Commit: ${{ env.TREE_SHA }})\`
-          - **Target Architecture:** \`arm64 (Snapdragon 732G)\`
-          - **Compiler Toolchain:** \`ZyCromerZ Clang 17 (LLVM Integrated Assembler)\`
-          - **Cross-Compilers:** \`Greenforce GCC 64-bit (aarch64-elf) & 32-bit (arm-eabi)\`
+          #### Build Specifications
+          - Target SoC: Qualcomm Snapdragon 732G (SM6150 / \`sdmsteppe\`)
+          - Kernel Version: \`${{ env.KERNEL_VERSION }}\`
+          - Build Time: \`${{ env.BUILD_TIME }}\` (WIB)
+          - Upstream Commit: \`manipvlator/los_kernel_xiaomi_sm6150@${{ env.TREE_SHA }}\`
+          - Compiler: ZyCromerZ Clang 17.0.0 (LLVM Integrated Assembler)
+          - Cross Compilers: Greenforce GCC 64-bit (\`aarch64-elf-\`) and 32-bit (\`arm-eabi-\`)
 
-          #### Integrated Kernel Patches & Features
-          - **KernelSU Next Integration:** Native in-tree root syscall interception.
-            - *Required Manager:* [KernelSU Next Manager APK](https://github.com/rifsxd/KernelSU-Next/releases) (Recommended build: **v1.0.5+** or **latest Next release**).
-          - **SusFS Patch (v2.2.0 NON-GKI):** Kernel-level mount & path concealment for advanced root-hiding and Play Integrity compliance.
-          - **SELinux Security:** Enforcing-ready with nosuid ksud exec permissions.
-          - **Power & Thermal Tuning:** Ultra Low Power State mode and low-frequency llcc-bw bus scaling for battery efficiency.
-          - **Network Optimization:** TCP Westwood / BBR congestion control enabled.
+          #### Integrated Components
+          - In-Tree KernelSU-Next (Syscall backend mode)
+          - SusFS v2.2.0 Non-GKI path/mount concealment and symbol hiding
+          - Schedutil CPU energy-model tuning
+          - Localversion locked to \`-AzeoKernel\` without \`-dirty\` suffix
 
           #### Flashing Instructions
-          1. Download \`${{ env.ZIP_NAME }}\`.
-          2. Reboot to Custom Recovery (TWRP / OrangeFox / Lineage Recovery).
-          3. *(Recommended)* Backup \`boot\` and \`dtbo\` partitions.
-          4. Flash the zip file and reboot system.
-          5. Install the KernelSU Next Manager app to manage superuser permissions.
+          1. Download \`${{ env.ZIP_NAME }}\` and verify with \`${{ env.ZIP_NAME }}.sha256\`.
+          2. Reboot to custom recovery (TWRP / OrangeFox / Lineage Recovery).
+          3. Flash the zip directly without wiping partitions.
+          4. Reboot to system.
+          5. Install [KernelSU-Next Manager](https://github.com/rifsxd/KernelSU-Next/releases).
 
           #### Cryptographic Checksum
           \`\`\`text
