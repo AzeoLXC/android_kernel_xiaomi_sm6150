@@ -76,7 +76,7 @@ jobs:
           ZIP_NAME="AzeoKernel-sweet-${KERNEL_VERSION}.zip"
 
           HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${KERNEL_VERSION}")
 
           FORCE_BUILD="${{ github.event.inputs.force_build }}"
@@ -143,15 +143,15 @@ jobs:
           echo "GCC64_PATH=$GITHUB_WORKSPACE/gcc64" >> $GITHUB_ENV
           echo "GCC32_PATH=$GITHUB_WORKSPACE/gcc32" >> $GITHUB_ENV
 
-      - name: Sync Submodule & Setup KernelSU-Next
+      - name: Sync Submodule & Setup KernelSU
         run: |
           git submodule update --init --recursive --remote
           cd source-code
           git checkout stable
           git pull origin stable
 
-          # Ingest KernelSU-Next syscall hook
-          curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU-Next/stable/kernel/setup.sh" | bash -s syscall
+          # Ingest KernelSU with SusFS (manipvlator syscall method)
+          curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
 
           # 1. Disable CONFIG_LOCALVERSION_AUTO to remove '-dirty' and git hash suffix
           # 2. Set CONFIG_LOCALVERSION to '-AzeoKernel' directly in defconfig
@@ -174,6 +174,7 @@ jobs:
             --set-str CONFIG_LOCALVERSION "-AzeoKernel" \
             -d CONFIG_LOCALVERSION_AUTO \
             -e CONFIG_KSU \
+            -e CONFIG_KSU_TAMPER_SYSCALL_TABLE \
             -e CONFIG_KSU_SUSFS \
             -e CONFIG_KSU_SUSFS_SUS_PATH \
             -e CONFIG_KSU_SUSFS_SUS_MOUNT \
