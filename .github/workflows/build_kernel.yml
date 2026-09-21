@@ -267,23 +267,27 @@ jobs:
           #### Build Specifications
           - Target SoC: Qualcomm Snapdragon 732G (SM6150 / \`sdmsteppe\`)
           - Kernel Version: \`${KERNEL_VERSION}\`
+          - Linux Baseline: Linux 4.14.357 LTS
           - Build Time: \`${BUILD_TIME}\` (WIB)
           - Upstream Commit: \`manipvlator/los_kernel_xiaomi_sm6150@${TREE_SHA}\`
           - Compiler: ZyCromerZ Clang 17.0.0 (LLVM Integrated Assembler)
           - Cross Compilers: Greenforce GCC 64-bit (\`aarch64-elf-\`) and 32-bit (\`arm-eabi-\`)
 
           #### Integrated Components
-          - In-Tree KernelSU-Next (Syscall backend mode)
-          - SusFS v2.2.0 Non-GKI path/mount concealment and symbol hiding
-          - Schedutil CPU energy-model tuning
-          - Localversion locked to \`-AzeoKernel\` without \`-dirty\` suffix
+          - In-Tree KernelSU (Syscall table tampering via \`CONFIG_KSU_TAMPER_SYSCALL_TABLE\`)
+          - SuSFS v2.3.0 Non-GKI path/mount concealment and symbol hiding
+          - CPU Governors: Reflex v0.3.0r2, Vorpal v2.2, NAP optimal-idle v0.5.0, Cambyses CFS v0.6.0
+          - Thermal & Power: step_wise gaming thermal governor and limits-dcvs throttle bypass
+          - Battery: qcacld-3.0 Wi-Fi wakelock mitigation
+          - Gamepad: PlayStation DualSense and DualSense Edge controller drivers
+          - Localversion: \`-AzeoKernel\` (\`CONFIG_LOCALVERSION_AUTO=n\`)
 
           #### Flashing Instructions
           1. Download \`${ZIP_NAME}\` and verify with \`${ZIP_NAME}.sha256\`.
           2. Reboot to custom recovery (TWRP / OrangeFox / Lineage Recovery).
           3. Flash the zip directly without wiping partitions.
           4. Reboot to system.
-          5. Install [KernelSU-Next Manager](https://github.com/rifsxd/KernelSU-Next/releases).
+          5. Install a supported manager (KernelSU Manager, KernelSU-Next Manager, or compatible fork).
 
           #### Cryptographic Checksum
           \`\`\`text
