@@ -230,6 +230,35 @@ jobs:
               print("Guarded optional SUSFS UID-filter handler against older kernel headers.")
           PY
 
+          # The same optional command adds parser hooks in KernelSU. Older
+          # SUSFS trees lack the implementation, so guard those calls as well.
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          guard = "CMD_SUSFS_SET_SUS_PATH_UID_FILTER"
+          call_pattern = re.compile(
+              r"(?m)^(?P<indent>[ \t]*)susfs_parse_sus_path_app_strings\(\s*\)\s*;"
+          )
+          patched = 0
+          for source_path in Path("drivers/kernelsu").rglob("*.c"):
+              source = source_path.read_text()
+
+              def add_guard(match):
+                  indent = match.group("indent")
+                  call = match.group(0)[len(indent):]
+                  return f"{indent}#ifdef {guard}\n{indent}{call}\n{indent}#endif"
+
+              source, count = call_pattern.subn(add_guard, source)
+              if count:
+                  source_path.write_text(source)
+                  patched += count
+
+          if patched == 0:
+              raise SystemExit("Could not find SUSFS app-string parser calls to guard")
+          print(f"Guarded {patched} optional SUSFS app-string parser call(s).")
+          PY
+
           # 1. Disable CONFIG_LOCALVERSION_AUTO to remove '-dirty' and git hash suffix
           # 2. Set CONFIG_LOCALVERSION to '-AzeoKernel' directly in defconfig
           sed -i 's/CONFIG_LOCALVERSION="-reforge"/CONFIG_LOCALVERSION="-AzeoKernel"/g' arch/arm64/configs/vendor/sweet_defconfig
