@@ -124,7 +124,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev \
+            bc bison ca-certificates cpio curl flex git libc6-dev libssl-dev libxml2 \
             make openssl python3 python-is-python3 libelf-dev \
             zlib1g-dev kmod libncurses5-dev lz4 aria2 tar jq wget zip
 
