@@ -154,6 +154,82 @@ jobs:
           # Ingest KernelSU with SusFS (manipvlator syscall method)
           curl -LSs "https://raw.githubusercontent.com/manipvlator/KernelSU/refs/heads/main/kernel/setup.sh" | bash -s main
 
+          # KernelSU main may include a newer optional SusFS UID-filter command
+          # than the kernel's SusFS headers provide. Compile that handler only
+          # when the kernel headers define its command ID.
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source_path = Path("drivers/kernelsu/supercall/supercall.c")
+          source = source_path.read_text()
+          needle = "if (cmd == CMD_SUSFS_SET_SUS_PATH_UID_FILTER)"
+          start = source.find(needle)
+          if start < 0:
+              raise SystemExit(f"Could not find expected SUSFS handler in {source_path}")
+
+          guard = "#ifdef CMD_SUSFS_SET_SUS_PATH_UID_FILTER"
+          if guard not in source[max(0, start - 160):start]:
+              line_start = source.rfind("\n", 0, start) + 1
+              brace = source.find("{", start)
+              if brace < 0:
+                  raise SystemExit("Could not find opening brace for SUSFS UID-filter handler")
+
+              depth = 0
+              state = "code"
+              index = brace
+              end = None
+              while index < len(source):
+                  char = source[index]
+                  next_char = source[index + 1] if index + 1 < len(source) else ""
+                  if state == "code":
+                      if char == "/" and next_char == "/":
+                          state = "line_comment"
+                          index += 2
+                          continue
+                      if char == "/" and next_char == "*":
+                          state = "block_comment"
+                          index += 2
+                          continue
+                      if char == '"':
+                          state = "string"
+                      elif char == "'":
+                          state = "char"
+                      elif char == "{":
+                          depth += 1
+                      elif char == "}":
+                          depth -= 1
+                          if depth == 0:
+                              end = index + 1
+                              break
+                  elif state == "line_comment":
+                      if char == "\n":
+                          state = "code"
+                  elif state == "block_comment":
+                      if char == "*" and next_char == "/":
+                          state = "code"
+                          index += 2
+                          continue
+                  elif state in ("string", "char"):
+                      if char == "\\":
+                          index += 2
+                          continue
+                      if (state == "string" and char == '"') or (state == "char" and char == "'"):
+                          state = "code"
+                  index += 1
+
+              if end is None:
+                  raise SystemExit("Could not find closing brace for SUSFS UID-filter handler")
+              source = (
+                  source[:line_start]
+                  + guard + "\n"
+                  + source[line_start:end]
+                  + "\n#endif"
+                  + source[end:]
+              )
+              source_path.write_text(source)
+              print("Guarded optional SUSFS UID-filter handler against older kernel headers.")
+          PY
+
           # 1. Disable CONFIG_LOCALVERSION_AUTO to remove '-dirty' and git hash suffix
           # 2. Set CONFIG_LOCALVERSION to '-AzeoKernel' directly in defconfig
           sed -i 's/CONFIG_LOCALVERSION="-reforge"/CONFIG_LOCALVERSION="-AzeoKernel"/g' arch/arm64/configs/vendor/sweet_defconfig
