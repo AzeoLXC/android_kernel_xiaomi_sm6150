@@ -193,9 +193,11 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             CC=clang \
-            CLANG_TRIPLE=$CLANG_PATH/aarch64-linux-gnu- \
+            LD=$CLANG_PATH/bin/ld.lld \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=$GCC64_PATH/bin/aarch64-elf- \
-            CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi-
+            CROSS_COMPILE_ARM32=$GCC32_PATH/bin/arm-eabi- \
+            V=1
 
       - name: Package Flashable Zip with AnyKernel3
         env:
